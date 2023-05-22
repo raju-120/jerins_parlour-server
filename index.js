@@ -4,6 +4,8 @@ const cors = require('cors');
 const app = express();
 const jwt = require('jsonwebtoken');
 require('dotenv').config() 
+const stripe = require("stripe")(process.env.STRIPE_SECRET_key);
+
 
 const port = process.env.PORT||5000;
 
@@ -44,22 +46,30 @@ function verifyJWT(req, res, next){
 
 } 
 
-
 async function run(){
     try{
         const appointmentOptionCollection = client.db('jerinParlour').collection('appointmentOption');
         const bookingsCollection = client.db('jerinParlour').collection('bookings');
         const usersCollection = client.db('jerinParlour').collection('users');
         const employeesCollection = client.db('jerinParlour').collection('employees');
+        const paymentsCollection = client.db('jerinParlour').collection('payments');
 
 
+        //Admin role check in 
 
-        const verifyAdmin = (req,res,next) =>{
-            const email = req.query.email;
-            console.log('inside verify Admin', email);
+        const verifyAdmin = async(req, res, next)=>{
+            console.log('Inside the verifyAdmin',req.decoded.email);
+            const decodedEmail = req.decoded.email;
+            const query = {email: decodedEmail};
+            const user = await usersCollection.findOne(query);
+            
+            if(user?.role !== 'admin'){
+                return res.status(403).send({message: 'forbidden access'})
+            }
+            
+
         }
 
-        
         // Use aggregate to query multiple collection and then merge data
         app.get('/appointmentOption', async(req, res) =>{
             const date= req.query.date;
@@ -101,6 +111,12 @@ async function run(){
             res.send(bookings);
         })
 
+        app.get('/bookings/:id', async( req, res) =>{
+            const id = req.params.id;
+            const query = { _id: new ObjectId(id)};
+            const booking = await bookingsCollection.findOne(query);
+            res.send(booking);
+        })
 
         app.post('/bookings', async(req, res) =>{
             const booking = req.body;
@@ -121,6 +137,38 @@ async function run(){
             const result = await bookingsCollection.insertOne(booking);
             res.send(result)
         });
+
+        app.post('/create-payment-intent', async (req, res) =>{
+            const booking = req.body;
+            const price = booking.price;
+            const amount = price*100;
+
+            const paymentIntent = await stripe.paymentIntents.create({
+                currency: 'usd',
+                amount: amount,
+                "payment_method_types": [
+                    "card"
+                  ],
+            });
+            res.send({
+                clientSecret: paymentIntent.client_secret,
+              });
+        })
+
+        app.post('/payments', async(req, res) =>{
+            const payment = req.body;
+            const result = await paymentsCollection.insertOne(payment);
+            const id = payment.bookingId;
+            const filter = {_id: new ObjectId(id)};
+            const updatedDoc = {
+                $set:{
+                    paid: true,
+                    transactionId: payment.transactionId
+                }
+            }
+            const updateResult = await bookingsCollection.updateOne(filter,updatedDoc);
+            res.send(result);
+        })
 
         app.get('/jwt', async(req,res) =>{
             const email =  req.query.email;
@@ -157,8 +205,10 @@ async function run(){
 
         app.put('/users/admin/:id',verifyJWT, async(req, res) =>{
             const decodedEmail = req.decoded.email;
+            console.log('check in',decodedEmail);
             const query = {email: decodedEmail};
             const user = await usersCollection.findOne(query);
+            
             if(user?.role !== 'admin'){
                 return res.status(403).send({message: 'forbidden access'})
             }
