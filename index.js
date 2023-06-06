@@ -138,6 +138,8 @@ async function run(){
             res.send(result)
         });
 
+        //Stripe Card Payment
+
         app.post('/create-payment-intent', async (req, res) =>{
             const booking = req.body;
             const price = booking.price;
@@ -153,8 +155,14 @@ async function run(){
             res.send({
                 clientSecret: paymentIntent.client_secret,
               });
+        });
+
+        //Paypal Payment
+        app.get('api/config/paypal', async(req, res) =>{
+            res.send(process.env.PAYPAL_CLIENT_ID)
         })
 
+        //Track record the payment 
         app.post('/payments', async(req, res) =>{
             const payment = req.body;
             const result = await paymentsCollection.insertOne(payment);
